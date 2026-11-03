@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<title>xD ZIP Builder</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+  body { background:#0b0b0b; color:#eee; font-family:system-ui,sans-serif; padding:24px; }
+  h1 { color:#22c55e; }
+  button { background:#22c55e; color:#000; border:0; padding:12px 20px;
+           font-weight:700; border-radius:10px; cursor:pointer; font-size:15px; }
+  button:disabled { opacity:.5; cursor:wait; }
+  pre { background:#111; padding:12px; border-radius:8px; max-height:260px; overflow:auto;
+        font-size:12px; color:#9ae6b4; }
+</style>
+</head>
+<body>
+<h1>xD ZIP Builder</h1>
+<p>Klik tombol → ZIP proyek ke-download langsung dari browser. Tanpa server.</p>
+<button id="go">Bikin &amp; Download xD.zip</button>
+<pre id="log">siap.</pre>
+
+<script>
+// ---------- wadah di memori (mirip dict FILES di Python) ----------
+const files = {};
+function add(path, content) {
+  // buang indentasi umum + newline awal, kayak textwrap.dedent di Python
+  const lines = content.replace(/^\n+/, "").split("\n");
+  const nonEmpty = lines.filter(l => l.trim().length > 0);
+  const indent = Math.min(...nonEmpty.map(l => l.match(/^ */)[0].length));
+  files[path] = lines.map(l => l.slice(indent)).join("\n");
+}
+
+// ---------- isi file proyek: tulis path lengkap (folder = "/") ----------
+
+add("xD/README.md", `
+# xD
+Cheat Free Fire — floating menu, Shizuku, build via GitHub Actions.
+`);
+
+add("xD/.github/workflows/build.yml", `
+name: Build xD APK
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Install NDK
+        run: |
+          yes | sdkmanager --licenses > /dev/null 2>&1 || true
+          sdkmanager "ndk;26.1.10909125"
+      - uses: gradle/actions/setup-gradle@v3
+      - name: Build debug APK
+        run: gradle assembleDebug --no-daemon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: xD-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
+`);
+
+add("xD/settings.gradle.kts", `
+pluginManagement {
+    repositories { google(); mavenCentral(); gradlePluginPortal() }
+}
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories { google(); mavenCentral() }
+}
+rootProject.name = "xD"
+include(":app")
+`);
+
+add("xD/build.gradle.kts", `
+plugins {
+    id("com.android.application") version "8.3.2" apply false
+    id("org.jetbrains.kotlin.android") version "1.9.24" apply false
+}
+`);
+
+add("xD/gradle.properties", `
+org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+android.useAndroidX=true
+kotlin.code.style=official
+android.nonTransitiveRClass=true
+`);
+
+add("xD/gradle/wrapper/gradle-wrapper.properties", `
+distributionBase=GRADLE_USER_HOME
+distributionPath=wrapper/dists
+distributionUrl=https\\://services.gradle.org/distributions/gradle-8.7-bin.zip
+zipStoreBase=GRADLE_USER_HOME
+zipStorePath=wrapper/dists
+`);
+
+add("xD/app/build.gradle.kts", `
+plugins {
+    id("com.android.application")
+    id("org.jetbrains.kotlin.android")
+}
+android {
+    namespace = "com.xd.cheat"
+    compileSdk = 34
+    ndkVersion = "26.1.10909125"
+    defaultConfig {
+        applicationId = "com.xd.cheat"
+        minSdk = 26
+        targetSdk = 34
+        versionCode = 1
+        versionName = "1.0"
+        externalNativeBuild {
+            cmake {
+                cppFlags += "-std=c++17 -O2 -fvisibility=hidden"
+                abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+            }
+        }
+    }
+    externalNativeBuild {
+        cmake { path = file("src/main/cpp/CMakeLists.txt"); version = "3.22.1" }
+    }
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+    kotlinOptions { jvmTarget = "17" }
+}
+dependencies {
+    implementation("androidx.core:core-ktx:1.13.1")
+    implementation("androidx.appcompat:appcompat:1.7.0")
+    implementation("com.google.android.material:material:1.12.0")
+    implementation("dev.rikka.shizuku:api:13.1.5")
+    implementation("dev.rikka.shizuku:provider:13.1.5")
+}
+`);
+
+add("xD/app/proguard-rules.pro", `
+-keep class com.xd.cheat.** { *; }
+-keep class rikka.shizuku.** { *; }
+`);
+
+add("xD/app/src/main/AndroidManifest.xml", `
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <application
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:label="xD"
+        android:theme="@style/Theme.XD">
+        <activity android:name=".MainActivity" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <service android:name=".FloatingService" android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="floating_overlay" />
+        </service>
+        <provider android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="\${applicationId}.shizuku"
+            android:enabled="true" android:exported="true" android:multiprocess="false"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
+    </application>
+</manifest>
+`);
+
+add("xD/app/src/main/cpp/CMakeLists.txt", `
+cmake_minimum_required(VERSION 3.22.1)
+project(xd LANGUAGES CXX)
+add_library(xd SHARED mem.cpp hooks.cpp xd.cpp)
+target_compile_options(xd PRIVATE -Wall -Wextra -fvisibility=hidden)
+target_link_libraries(xd PRIVATE log android)
+`);
+
+add("xD/app/src/main/cpp/mem.h", `
+#pragma once
+#include <sys/uio.h>
+#include <unistd.h>
+#include <cstdint>
+class Mem {
+public:
+    static pid_t g_pid;
+    static uintptr_t g_base;
+    static bool attach(const char* pkg);
+    static void detach();
+    template<typename T> static T read(uintptr_t addr) {
+        T out{};
+        struct iovec l{ &out, sizeof(T) };
+        struct iovec r{ (void*)addr, sizeof(T) };
+        if (process_vm_readv(g_pid, &l, 1, &r, 1, 0) != (ssize_t)sizeof(T)) return T{};
+        return out;
+    }
+    template<typename T> static bool write(uintptr_t addr, T val) {
+        struct iovec l{ &val, sizeof(T) };
+        struct iovec r{ (void*)addr, sizeof(T) };
+        return process_vm_writev(g_pid, &l, 1, &r, 1, 0) == (ssize_t)sizeof(T);
+    }
+    static uintptr_t off(uintptr_t o) { return g_base + o; }
+};
+`);
+
+add("xD/app/src/main/cpp/mem.cpp", `
+#include "mem.h"
+#include <dirent.h>
+#include <cstring>
+#include <cstdio>
+#include <cstdlib>
+#include <android/log.h>
+#define LOG(...) __android_log_print(ANDROID_LOG_INFO, "xD", __VA_ARGS__)
+pid_t Mem::g_pid = -1;
+uintptr_t Mem::g_base = 0;
+static pid_t find_pid(const char* pkg) {
+    DIR* d = opendir("/proc"); if (!d) return -1;
+    struct dirent* e; pid_t found = -1; char buf[256];
+    while ((e = readdir(d))) {
+        pid_t pid = atoi(e->d_name); if (pid <= 0) continue;
+        char p[256]; snprintf(p, sizeof(p), "/proc/%d/cmdline", pid);
+        FILE* f = fopen(p, "r"); if (!f) continue;
+        size_t n = fread(buf, 1, sizeof(buf) - 1, f); fclose(f);
+        if (n == 0) continue; buf[n] = 0;
+        if (strcmp(buf, pkg) == 0) { found = pid; break; }
+    }
+    closedir(d); return found;
+}
+static uintptr_t find_base(pid_t pid, const char* lib) {
+    char p[64], line[512]; snprintf(p, sizeof(p), "/proc/%d/maps", pid);
+    FILE* f = fopen(p, "r"); if (!f) return 0;
+    uintptr_t base = 0;
+    while (fgets(line, sizeof(line), f)) {
+        if (strstr(line, lib) && strstr(line, "r-xp")) { base = strtoull(line, nullptr, 16); break; }
+    }
+    fclose(f); return base;
+}
+bool Mem::attach(const char* pkg) {
+    g_pid = find_pid(pkg);
+    if (g_pid <= 0) { LOG("pid not found %s", pkg); return false; }
+    g_base = find_base(g_pid, "libil2cpp.so");
+    LOG("attached pid=%d base=0x%lx", g_pid, (unsigned long)g_base);
+    return g_pid > 0 && g_base > 0;
+}
+void Mem::detach() { g_pid = -1; g_base = 0; }
+`);
+
+add("xD/app/src/main/cpp/offsets.h", `
+#pragma once
+#include <cstdint>
+// ILUSTRASI — dump sendiri dari libil2cpp.so versi FF target
+namespace Off {
+    constexpr uintptr_t PlayerManager_GetLocal = 0x2C4F10;
+    constexpr uintptr_t Player_Health          = 0x1A8;
+    constexpr uintptr_t Player_Speed           = 0x220;
+    constexpr uintptr_t Player_Ammo            = 0x248;
+    constexpr uintptr_t Player_Recoil          = 0x260;
+}
+`);
+
+add("xD/app/src/main/cpp/hooks.h", `
+#pragma once
+void startFeatureLoop(int id, bool enable);
+bool isFeatureEnabled(int id);
+`);
+
+add("xD/app/src/main/cpp/hooks.cpp", `
+#include "hooks.h"
+#include "mem.h"
+#include "offsets.h"
+#include <atomic>
+#include <thread>
+#include <chrono>
+#include <mutex>
+static std::atomic<bool> g_on[16];
+static std::thread g_worker[16];
+static std::mutex g_mtx[16];
+bool isFeatureEnabled(int id) {
+    if (id < 0 || id >= 16) return false;
+    return g_on[id].load();
+}
+static void loopFeature(int id) {
+    while (g_on[id].load()) {
+        if (Mem::g_pid <= 0) { std::this_thread::sleep_for(std::chrono::milliseconds(500)); continue; }
+        switch (id) {
+            case 0: { auto l = Mem::read<uintptr_t>(Mem::off(Off::PlayerManager_GetLocal)); if (l) Mem::write<int>(l + Off::Player_Health, 9999); break; }
+            case 1: { auto l = Mem::read<uintptr_t>(Mem::off(Off::PlayerManager_GetLocal)); if (l) Mem::write<int>(l + Off::Player_Ammo, 999); break; }
+            case 2: { auto l = Mem::read<uintptr_t>(Mem::off(Off::PlayerManager_GetLocal)); if (l) Mem::write<float>(l + Off::Player_Recoil, 0.f); break; }
+            case 3: { auto l = Mem::read<uintptr_t>(Mem::off(Off::PlayerManager_GetLocal)); if (l) { float s = Mem::read<float>(l + Off::Player_Speed); if (s > 0 && s < 100) Mem::write<float>(l + Off::Player_Speed, s * 2.f); } break; }
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+}
+void startFeatureLoop(int id, bool enable) {
+    if (id < 0 || id >= 16) return;
+    std::lock_guard<std::mutex> lk(g_mtx[id]);
+    if (enable) {
+        if (g_on[id].load()) return;
+        g_on[id].store(true);
+        if (g_worker[id].joinable()) g_worker[id].join();
+        g_worker[id] = std::thread(loopFeature, id);
+    } else {
+        g_on[id].store(false);
+        if (g_worker[id].joinable()) g_worker[id].join();
+    }
+}
+`);
+
+add("xD/app/src/main/cpp/xd.cpp", `
+#include <jni.h>
+#include "mem.h"
+#include "hooks.h"
+extern "C" {
+JNIEXPORT jboolean JNICALL Java_com_xd_cheat_XdNative_attach(JNIEnv* e, jclass, jstring jp) {
+    const char* p = e->GetStringUTFChars(jp, nullptr);
+    bool ok = Mem::attach(p);
+    e->ReleaseStringUTFChars(jp, p);
+    return ok ? JNI_TRUE : JNI_FALSE;
+}
+JNIEXPORT void JNICALL Java_com_xd_cheat_XdNative_detach(JNIEnv*, jclass) { Mem::detach(); }
+JNIEXPORT jboolean JNICALL Java_com_xd_cheat_XdNative_isAttached(JNIEnv*, jclass) {
+    return (Mem::g_pid > 0 && Mem::g_base > 0) ? JNI_TRUE : JNI_FALSE;
+}
+JNIEXPORT jint JNICALL Java_com_xd_cheat_XdNative_getPid(JNIEnv*, jclass) { return (jint)Mem::g_pid; }
+JNIEXPORT void JNICALL Java_com_xd_cheat_XdNative_toggleFeature(JNIEnv*, jclass, jint id, jboolean on) {
+    startFeatureLoop((int)id, on == JNI_TRUE);
+}
+JNIEXPORT jboolean JNICALL Java_com_xd_cheat_XdNative_isFeatureOn(JNIEnv*, jclass, jint id) {
+    return isFeatureEnabled((int)id) ? JNI_TRUE : JNI_FALSE;
+}
+}
+`);
+
+add("xD/app/src/main/res/values/colors.xml", `
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="xd_black">#FF0B0B0B</color>
+    <color name="xd_white">#FFFFFFFF</color>
+    <color name="xd_green">#FF22C55E</color>
+</resources>
+`);
+
+add("xD/app/src/main/res/values/strings.xml", `
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">xD</string>
+    <string name="shizuku_grant">Aktifkan via Shizuku</string>
+    <string name="start_panel">Mulai Panel Melayang</string>
+    <string name="theme_toggle">Tema Hitam / Putih</string>
+</resources>
+`);
+
+add("xD/app/src/main/res/values/themes.xml", `
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.XD" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="android:statusBarColor">@color/xd_black</item>
+        <item name="android:navigationBarColor">@color/xd_black</item>
+    </style>
+</resources>
+`);
+
+add("xD/app/src/main/res/drawable/bg_panel_dark.xml", `
+<?xml version="1.0" encoding="utf-8"?>
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="#E60B0B0B" />
+    <corners android:radius="18dp" />
+    <stroke android:width="1dp" android:color="#33FFFFFF" />
+</shape>
+`);
+
+add("xD/app/src/main/res/drawable/bg_panel_light.xml", `
+<?xml version="1.0" encoding="utf-8"?>
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="#F2FFFFFF" />
+    <corners android:radius="18dp" />
+    <stroke android:width="1dp" android:color="#22000000" />
+</shape>
+`);
+
+add("xD/app/src/main/res/drawable/ic_launcher_foreground.xml", `
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path android:fillColor="#22C55E" android:pathData="M30,30h48v48h-48z" />
+</vector>
+`);
+
+add("xD/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml", `
+<?xml version="1.0" encoding="utf-8"?>
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@color/xd_black" />
+    <foreground android:drawable="@drawable/ic_launcher_foreground" />
+</adaptive-icon>
+`);
+
+add("xD/app/src/main/res/layout/activity_main.xml", `
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:orientation="vertical" android:padding="24dp" android:background="@color/xd_black">
+    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+        android:text="xD" android:textColor="@color/xd_white" android:textSize="48sp" android:textStyle="bold" />
+    <TextView android:id="@+id/tvStatus" android:layout_width="wrap_content" android:layout_height="wrap_content"
+        android:layout_marginTop="8dp" android:text="Status: belum terhubung"
+        android:textColor="@color/xd_green" android:textSize="14sp" />
+    <Button android:id="@+id/btnShizuku" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_marginTop="24dp" android:text="@string/shizuku_grant" />
+    <Button android:id="@+id/btnAttach" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_marginTop="12dp" android:text="Attach ke Free Fire" />
+    <Button android:id="@+id/btnPanel" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_marginTop="12dp" android:text="@string/start_panel" />
+    <Button android:id="@+id/btnTheme" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_marginTop="12dp" android:text="@string/theme_toggle" />
+</LinearLayout>
+`);
+
+add("xD/app/src/main/res/layout/panel_floating.xml", `
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/panelRoot" android:layout_width="wrap_content" android:layout_height="wrap_content"
+    android:orientation="vertical" android:padding="12dp" android:background="@drawable/bg_panel_dark">
+    <TextView android:id="@+id/panelTitle" android:layout_width="wrap_content" android:layout_height="wrap_content"
+        android:text="xD Cheat" android:textColor="@color/xd_white" android:textSize="14sp" android:textStyle="bold" />
+    <Switch android:id="@+id/swGod" android:layout_width="wrap_content" android:layout_height="wrap_content"
+        android:layout_marginTop="6dp" android:text="God Mode" android:textColor="@color/xd_white" />
+    <Switch android:id="@+id/swAmmo" android:layout_width="wrap_content" android:layout_height="wrap_content"
+        android:text="Ammo" android:textColor="@color/xd_white" />
+    <Switch android:id="@+id/swRecoil" android:layout_width="wrap_content" android:layout_height="wrap_content"
+        android:text="No Recoil" android:textColor="@color/xd_white" />
+    <Switch android:id="@+id/swSpeed" android:layout_width="wrap_content" android:layout_height="wrap_content"
+        android:text="Speed x2" android:textColor="@color/xd_white" />
+</LinearLayout>
+`);
+
+add("xD/app/src/main/java/com/xd/cheat/XdNative.kt", `
+package com.xd.cheat
+object XdNative {
+    init { System.loadLibrary("xd") }
+    external fun attach(pkg: String): Boolean
+    external fun detach()
+    external fun isAttached(): Boolean
+    external fun getPid(): Int
+    external fun toggleFeature(id: Int, on: Boolean)
+    external fun isFeatureOn(id: Int): Boolean
+    const val F_GOD = 0
+    const val F_AMMO = 1
+    const val F_RECOIL = 2
+    const val F_SPEED = 3
+}
+`);
+
+add("xD/app/src/main/java/com/xd/cheat/ShizukuHelper.kt", `
+package com.xd.cheat
+import android.content.pm.PackageManager
+import rikka.shizuku.Shizuku
+object ShizukuHelper {
+    private const val REQ = 1001
+    fun isAvailable(): Boolean = try { Shizuku.pingBinder() && !Shizuku.isPreV11() } catch (t: Throwable) { false }
+    fun hasPermission(): Boolean = try { Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED } catch (t: Throwable) { false }
+    fun requestPermission() { if (isAvailable() && !hasPermission()) Shizuku.requestPermission(REQ) }
+}
+`);
+
+add("xD/app/src/main/java/com/xd/cheat/MainActivity.kt", `
+package com.xd.cheat
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
+import android.os.Bundle
+import android.provider.Settings
+import android.widget.Button
+import android.widget.TextView
+import android.widget.Toast
+import androidx.appcompat.app.AppCompatActivity
+class MainActivity : AppCompatActivity() {
+    private lateinit var tvStatus: TextView
+    override fun onCreate(s: Bundle?) {
+        super.onCreate(s); setContentView(R.layout.activity_main)
+        tvStatus = findViewById(R.id.tvStatus)
+        if (!Settings.canDrawOverlays(this)) {
+            startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
+        }
+        findViewById<Button>(R.id.btnShizuku).setOnClickListener {
+            if (!ShizukuHelper.isAvailable()) { Toast.makeText(this, "Shizuku belum jalan", Toast.LENGTH_LONG).show(); return@setOnClickListener }
+            if (ShizukuHelper.hasPermission()) tvStatus.text = "Status: Shizuku OK" else ShizukuHelper.requestPermission()
+        }
+        findViewById<Button>(R.id.btnAttach).setOnClickListener {
+            val ok = XdNative.attach("com.dts.freefireth")
+            tvStatus.text = if (ok) "Status: attach OK (pid=\${XdNative.getPid()})" else "Status: attach gagal"
+            Toast.makeText(this, tvStatus.text, Toast.LENGTH_SHORT).show()
+        }
+        findViewById<Button>(R.id.btnPanel).setOnClickListener {
+            val svc = Intent(this, FloatingService::class.java)
+            if (Build.VERSION.SDK_IN
